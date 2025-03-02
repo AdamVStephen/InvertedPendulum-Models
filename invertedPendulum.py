@@ -2,13 +2,13 @@
 #
 """
 Python models of the UCLA Edukit rotary inverted pendulum
-and the associated STM32 embedded rotary encoder/motor 
+and the associated STM32 embedded rotary encoder/motor
 sensor and actuator systems.
 """
 
 import pdb
 
-from struct import pack, unpack
+from struct import pack, unpack, calcsize
 
 class L6474:
     """
@@ -36,7 +36,7 @@ class CommandInterpreter:
         253 : ["Read Status. No parameters", 10,  'BB7b' ],
         254 : ["Apply acceleration", 10, 'BBff']
     }
-    
+
     def __init__(self):
         pass
 
@@ -75,15 +75,15 @@ class SerialFrame:
     """
     Base class for describing serial protocols
     """
-    format = "!b"
+    format = "!B"
     fields = [
         ('demo_byte', 0),
         ]
 
     def __init__(self):
-       (field_names, default_values) = zip(*self.fields)
-       self.Record = namedtuple('Record', ' '.join(field_names), defaults = default_values)
-       self.record = self.Record()
+        (field_names, default_values) = zip(*self.fields)
+        self.Record = namedtuple('Record', ' '.join(field_names), defaults = default_values)
+        self.record = self.Record()
 
     def unpack(self, data):
         self.record = self.record._make(unpack(self.format, data))
@@ -92,15 +92,19 @@ class SerialFrame:
         if len(args) != len(self.format) - 1:
             raise RuntimeError(f'{len(args)} arguments provided, {len(self.format) -1} arguments required')
 
-        self.data = pack(self.format, *args) 
+        self.data = pack(self.format, *args)
 
         self.unpack(self.data)
-    
+
+    def describe(self):
+        return(f"Frame format {self.format} contains {calcsize(self.format)} bytes")
+
     def __repr__(self):
         r = []
         r.append(f'{self.__class__.__name__} with format {self.format}')
         for field in self.record._fields:
-            r.append("%s : %d" % (field, self.record.__getattribute__(field)))
+            r.append("%s : %s" % (field, self.record.__getattribute__(field)))
+        r.append(self.describe())
         return '\n'.join(r)
 
 
@@ -126,11 +130,11 @@ class CommandFrame(SerialFrame):
     Command frame layout:
  *        byte 0: command ID
  *        byte 1: device ID
- *        byte 2-9: command parameters 
-    
+ *        byte 2-9: command parameters
+
     """
- 
-    format = "!bbQ"
+
+    format = "!BBQ"
     fields = [
             ('commandID', 0),
             ('deviceID', 0),
@@ -141,17 +145,26 @@ class CommandFrame(SerialFrame):
         # Option to customise the class on the fly
         # param_spec must be a list of (field, format, default_value)
         if param_spec is not None:
-            format = format[0:2]
+            fields = self.fields[0:2]
+            format = self.format[0:3]
             for (field_name, field_format, field_default) in param_spec:
                 format += field_format
-                self.fields.append((field_name, field_default))
+                fields.append((field_name, field_default))
+            self.format = format
+            self.fields = fields
         super().__init__()
 
-    def pack(self, commandID, deviceID, errorCode, responseSize, motorState, motorPos, encoderPos):
-        """Repeat the field order to give better function signature"""
-        self.data = pack(self.format, commandID, deviceID, errorCode, responseSize,
-                            motorState, motorPos, encoderPos)
-        self.unpack(self.data)
+class CommandFrame(SerialFrame):
+    """
+    """
+
+    format = "!BBQ"
+    fields = [
+            ('commandID', 0),
+            ('deviceID', 0),
+            ('params', 0),
+            ]
+
 
 class CommandResponseFrame(SerialFrame):
     """
@@ -162,30 +175,15 @@ class CommandResponseFrame(SerialFrame):
  *        byte 1: device ID
  *        byte 2: error code (0 == OK)
  *        bytes 3-6: command return values : depend on command
- *        or
- *        bytes 3-12: status : always the same
-
-    Which response is received can be determined by frame size (7 or 13)
-
-    This class is for the 13 byte CommandResponse
    """
- 
-    format = "!bbbbbiI"
+
+    format = "!BBBI"
     fields = [
             ('commandID', 0),
             ('deviceID', 0),
             ('errorCode', 0),
-            ('responseSize', 13),
-            ('motorState', 0),
-            ('motorPos', 0),
-            ('encoderPos', 0)
+            ('cmdResponse', 0),
             ]
-
-    def pack(self, commandID, deviceID, errorCode, responseSize, motorState, motorPos, encoderPos):
-        """Repeat the field order to give better function signature"""
-        self.data = pack(self.format, commandID, deviceID, errorCode, responseSize,
-                            motorState, motorPos, encoderPos)
-        self.unpack(self.data)
 
 
 class StatusResponseFrame(SerialFrame):
@@ -204,7 +202,7 @@ class StatusResponseFrame(SerialFrame):
 
     This class is for the status response frame
    """
-    format = "!bbbbbiI"
+    format = "!BBBBBiI"
     fields = [
             ('commandID', 0),
             ('deviceID', 0),
@@ -221,7 +219,7 @@ class StatusResponseFrame(SerialFrame):
                             motorState, motorPos, encoderPos)
         self.unpack(self.data)
 
- class DataFrame(SerialFrame):
+class DataFrame(SerialFrame):
     """
     DataFrame model from RokHari control implementation
      Status response data layout:
@@ -233,8 +231,8 @@ class StatusResponseFrame(SerialFrame):
  *        bytes 5-8: motor position (int32_t)
  *        bytes 9-12: encoder position (uint32_t)
     """
- 
-    format = "!bbbbbiI"
+
+    format = "!BBBBBiI"
     fields = [
             ('commandID', 0),
             ('deviceID', 0),
@@ -250,8 +248,8 @@ class StatusResponseFrame(SerialFrame):
         self.data = pack(self.format, commandID, deviceID, errorCode, responseSize,
                             motorState, motorPos, encoderPos)
         self.unpack(self.data)
- 
-     
+
+
 class DataFrame0:
     """
     DataFrame model from RokHari control implementation
@@ -264,7 +262,7 @@ class DataFrame0:
  *        bytes 5-8: motor position (int32_t)
  *        bytes 9-12: encoder position (uint32_t)
     """
-    format = "!bbbbbiI"
+    format = "!BBBBBiI"
     def __init__(self):
         self.fields = [
             ('commandID', 0),
@@ -288,7 +286,7 @@ class DataFrame0:
                             motorState, motorPos, encoderPos)
 
         self.unpack(self.data)
-    
+
     def __repr__(self):
         r = []
         r.append(f'{self.__class__.__name__} with format {self.format}')
@@ -330,6 +328,16 @@ def ut_DataFrame():
     dg.unpack(data)
     print(dg)
 
+def ut_CommandResponseFrame():
+    crf = CommandResponseFrame()
+    crf.pack(1,2,3,4)
+    print(crf)
+
+def ut_StatusResponseFrame():
+    srf = StatusResponseFrame()
+    srf.pack(1,2,3,13,5,6,7)
+    print(srf)
+
 class MockEdukitSTM32:
     def __init__(self):
         pass
@@ -344,6 +352,8 @@ def main():
     ut_DataFrame0()
     ut_SerialFrame()
     ut_DataFrame()
+    ut_CommandResponseFrame()
+    ut_StatusResponseFrame()
 
 if __name__ == '__main__':
     main()
